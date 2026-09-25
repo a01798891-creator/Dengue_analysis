@@ -1,0 +1,62 @@
+Se encontraron 7 archivos CSV.
+
+Analizando el archivo de muestra: Dataframe_dengue_20_confirmados_htpe.csv
+
+--- Variables Numéricas Detectadas ---
+ - Unnamed: 0.1
+ - Unnamed: 0
+ - ID_REGISTRO
+ - SEXO
+ - EDAD_ANOS
+ - HABLA_LENGUA_INDIG
+ - INDIGENA
+ - ENTIDAD_UM_NOTIF
+ - MUNICIPIO_UM_NOTIF
+ - INSTITUCION_UM_NOTIF
+ - TIPO_PACIENTE
+ - HEMORRAGICOS
+ - DIABETES
+ - HIPERTENSION
+ - ENFERMEDAD_ULC_PEPTICA
+ - ENFERMEDAD_RENAL
+ - INMUNOSUPR
+ - CIRROSIS_HEPATICA
+ - EMBARAZO
+ - DEFUNCION
+ - DICTAMEN
+ - TOMA_MUESTRA
+ - RESULTADO_PCR
+ - ESTATUS_CASO
+ - ENTIDAD_ASIG
+ - MUNICIPIO_ASIG
+ - latitud
+ - longitud
+ - CVEGEO
+ - CVE_LOC
+ - ALTITUD
+ - POB_TOTAL
+ - POB_MASCULINA
+ - POB_FEMENINA
+ - TOTAL DE VIVIENDAS HABITADAS
+ - CVE_ENT
+ - CVE_MUN
+ - humedad_relativa
+ - temperatura
+ - prec
+ - evap
+
+--- Variables Categóricas Detectadas ---
+ - FECHA_ACTUALIZACION
+ - fecha
+ - Nombre_entidad
+ - Nombre_municipio
+ - NOM_LOC
+ - AMBITO
+
+PREGUNTA DE INVESTIGACIÓN:
+
+
+¿Cómo influyen las variables meteorológicas (temperatura, precipitación) y las comorbilidades
+preexistentes (diabetes, hipertensión) en la probabilidad de desarrollar dengue hemorrágico o
+resultar en defunción en las distintas zonas geográficas de México entre 2020 y 2026?
+
