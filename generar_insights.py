@@ -12,13 +12,15 @@ Downloads, como usa analisis_dengue.py) y corre:
 import glob
 import os
 import re
+import time
 from collections import Counter, defaultdict
 
 import pandas as pd
 
 CHUNKSIZE = 200_000
+ARCHIVO_DESCRIPTORES = "Descriptores_Dengue.xlsx"
+ARCHIVO_CATALOGOS = "Catalogos_Dengue.xlsx"
 
-# Variables binarias tipo SINAVE: 1 = Sí, 2 = No (97/98/99 = no aplica/se ignora/no especificado)
 COMORBILIDADES = [
     "DIABETES", "HIPERTENSION", "ENFERMEDAD_ULC_PEPTICA",
     "ENFERMEDAD_RENAL", "INMUNOSUPR", "CIRROSIS_HEPATICA", "EMBARAZO",
@@ -29,6 +31,66 @@ COLUMNAS_DESEADAS = (
     ["EDAD_ANOS", "SEXO", "TIPO_PACIENTE", "Nombre_entidad"]
     + COMORBILIDADES + DESENLACES + VARIABLES_CLIMA
 )
+
+
+def cargar_catalogos(directorio):
+    """Lee Descriptores_Dengue.xlsx y Catalogos_Dengue.xlsx si existen, para no
+    asumir a ciegas qué significa cada código (p.ej. si 1=SI o 1=NO)."""
+    descriptores = {}
+    ruta_desc = os.path.join(directorio, ARCHIVO_DESCRIPTORES)
+    if os.path.exists(ruta_desc):
+        try:
+            df = pd.read_excel(ruta_desc, sheet_name="DESCRIPTORES")
+            df.columns = [str(c).strip().upper() for c in df.columns]
+            col_nombre = next(c for c in df.columns if "NOMBRE" in c)
+            col_desc = next(c for c in df.columns if "DESCRIPCION" in c or "DESCRIPCIÓN" in c)
+            for _, fila in df.iterrows():
+                nombre = str(fila[col_nombre]).strip().replace(" ", "_")
+                descriptores[nombre] = str(fila[col_desc]).strip()
+        except Exception as e:
+            print(f"  Aviso: no se pudo leer {ARCHIVO_DESCRIPTORES}: {e}")
+
+    # códigos SI/NO y TIPO_PACIENTE, con default por si el catálogo no está disponible
+    codigo_si, codigo_no = 1, 2
+    codigo_ambulatorio, codigo_hospitalizado = 1, 2
+    ruta_cat = os.path.join(directorio, ARCHIVO_CATALOGOS)
+    if os.path.exists(ruta_cat):
+        try:
+            xls = pd.ExcelFile(ruta_cat)
+            hoja_si_no = next(h for h in xls.sheet_names if "SI_NO" in h.upper().replace(" ", "_"))
+            cat = pd.read_excel(xls, sheet_name=hoja_si_no)
+            cat.columns = [str(c).strip().upper() for c in cat.columns]
+            col_clave = next(c for c in cat.columns if "CLAVE" in c)
+            col_desc = next(c for c in cat.columns if "DESCRIP" in c)
+            for _, fila in cat.iterrows():
+                etiqueta = str(fila[col_desc]).strip().upper()
+                if etiqueta == "SI":
+                    codigo_si = int(fila[col_clave])
+                elif etiqueta == "NO":
+                    codigo_no = int(fila[col_clave])
+
+            hoja_tp = next((h for h in xls.sheet_names if "TIPO_PACIENTE" in h.upper().replace(" ", "_")), None)
+            if hoja_tp:
+                cat_tp = pd.read_excel(xls, sheet_name=hoja_tp)
+                cat_tp.columns = [str(c).strip().upper() for c in cat_tp.columns]
+                col_clave_tp = next(c for c in cat_tp.columns if "CLAVE" in c)
+                col_desc_tp = next(c for c in cat_tp.columns if "DESCRIP" in c)
+                for _, fila in cat_tp.iterrows():
+                    etiqueta = str(fila[col_desc_tp]).strip().upper()
+                    if etiqueta == "AMBULATORIO":
+                        codigo_ambulatorio = int(fila[col_clave_tp])
+                    elif etiqueta == "HOSPITALIZADO":
+                        codigo_hospitalizado = int(fila[col_clave_tp])
+        except Exception as e:
+            print(f"  Aviso: no se pudo leer {ARCHIVO_CATALOGOS}: {e}")
+
+    return {
+        "descriptores": descriptores,
+        "si": codigo_si,
+        "no": codigo_no,
+        "ambulatorio": codigo_ambulatorio,
+        "hospitalizado": codigo_hospitalizado,
+    }
 
 
 def encontrar_archivos():
@@ -78,8 +140,28 @@ class AcumuladorCorrelacion:
 
 
 def main():
+    directorio = os.path.dirname(os.path.abspath(__file__))
+    catalogo = cargar_catalogos(directorio)
+    codigo_si, codigo_no = catalogo["si"], catalogo["no"]
+    codigo_hosp = catalogo["hospitalizado"]
+
+    print(f"Códigos detectados en el catálogo: SI={codigo_si}, NO={codigo_no}, HOSPITALIZADO={codigo_hosp}")
+
+    if catalogo["descriptores"]:
+        print("\n" + "=" * 70)
+        print("DICCIONARIO DE VARIABLES (de Descriptores_Dengue.xlsx)")
+        print("=" * 70)
+        for var in COMORBILIDADES + DESENLACES + ["TIPO_PACIENTE", "SEXO", "EDAD_ANOS"]:
+            desc = catalogo["descriptores"].get(var)
+            if desc:
+                print(f"  {var}: {desc}")
+
+    # DESENLACES_EXTENDIDO incluye HOSPITALIZADO (derivado de TIPO_PACIENTE) como
+    # proxy adicional de severidad, además de DEFUNCION y HEMORRAGICOS.
+    desenlaces_ext = DESENLACES + ["HOSPITALIZADO"]
+
     archivos = encontrar_archivos()
-    print(f"Se encontraron {len(archivos)} archivos CSV.")
+    print(f"\nSe encontraron {len(archivos)} archivos CSV.")
     if not archivos:
         print("No se encontraron archivos. Descárgalos del Release y colócalos junto a este script.")
         return
@@ -87,8 +169,8 @@ def main():
     filas_por_anio = Counter()
     conteo_entidad = Counter()
     # crosstab[comorbilidad][desenlace] = {"con_si": 0, "con_no": 0, "sin_si": 0, "sin_no": 0}
-    crosstab = {c: {d: defaultdict(int) for d in DESENLACES} for c in COMORBILIDADES}
-    correlaciones = {clima: {d: AcumuladorCorrelacion() for d in DESENLACES} for clima in VARIABLES_CLIMA}
+    crosstab = {c: {d: defaultdict(int) for d in desenlaces_ext} for c in COMORBILIDADES}
+    correlaciones = {clima: {d: AcumuladorCorrelacion() for d in desenlaces_ext} for clima in VARIABLES_CLIMA}
     nulos = Counter()
     total_filas = 0
 
@@ -96,12 +178,18 @@ def main():
         anio = extraer_anio(archivo)
         header = pd.read_csv(archivo, nrows=0).columns.tolist()
         cols_disponibles = [c for c in COLUMNAS_DESEADAS if c in header]
-        print(f"Procesando {os.path.basename(archivo)} (año {anio}), columnas usadas: {len(cols_disponibles)}")
+        tam_mb = os.path.getsize(archivo) / (1024 * 1024)
+        print(f"Procesando {os.path.basename(archivo)} (año {anio}, {tam_mb:.0f} MB), columnas usadas: {len(cols_disponibles)}")
 
-        for chunk in pd.read_csv(archivo, usecols=cols_disponibles, chunksize=CHUNKSIZE, low_memory=False):
+        inicio = time.time()
+        filas_archivo = 0
+        for i, chunk in enumerate(pd.read_csv(archivo, usecols=cols_disponibles, chunksize=CHUNKSIZE, low_memory=False), start=1):
             n = len(chunk)
             total_filas += n
             filas_por_anio[anio] += n
+            filas_archivo += n
+            if i % 5 == 0:
+                print(f"  ...{filas_archivo:,} filas leídas ({time.time() - inicio:.0f}s)", flush=True)
 
             for col in cols_disponibles:
                 nulos[col] += chunk[col].isna().sum()
@@ -109,30 +197,38 @@ def main():
             if "Nombre_entidad" in chunk:
                 conteo_entidad.update(chunk["Nombre_entidad"].dropna().value_counts().to_dict())
 
+            # HOSPITALIZADO se deriva de TIPO_PACIENTE, recodificado a la misma
+            # escala SI/NO del catálogo para poder reusar la misma lógica de abajo.
+            if "TIPO_PACIENTE" in chunk:
+                chunk = chunk.copy()
+                chunk["HOSPITALIZADO"] = chunk["TIPO_PACIENTE"].map(
+                    {codigo_hosp: codigo_si, catalogo["ambulatorio"]: codigo_no}
+                )
+
             for com in COMORBILIDADES:
                 if com not in chunk:
                     continue
-                for des in DESENLACES:
+                for des in desenlaces_ext:
                     if des not in chunk:
                         continue
                     sub = chunk[[com, des]].dropna()
-                    sub = sub[sub[com].isin([1, 2]) & sub[des].isin([1, 2])]
+                    sub = sub[sub[com].isin([codigo_si, codigo_no]) & sub[des].isin([codigo_si, codigo_no])]
                     if sub.empty:
                         continue
                     ct = crosstab[com][des]
-                    ct["con_si"] += ((sub[com] == 1) & (sub[des] == 1)).sum()
-                    ct["con_no"] += ((sub[com] == 1) & (sub[des] == 2)).sum()
-                    ct["sin_si"] += ((sub[com] == 2) & (sub[des] == 1)).sum()
-                    ct["sin_no"] += ((sub[com] == 2) & (sub[des] == 2)).sum()
+                    ct["con_si"] += ((sub[com] == codigo_si) & (sub[des] == codigo_si)).sum()
+                    ct["con_no"] += ((sub[com] == codigo_si) & (sub[des] == codigo_no)).sum()
+                    ct["sin_si"] += ((sub[com] == codigo_no) & (sub[des] == codigo_si)).sum()
+                    ct["sin_no"] += ((sub[com] == codigo_no) & (sub[des] == codigo_no)).sum()
 
             for clima in VARIABLES_CLIMA:
                 if clima not in chunk:
                     continue
-                for des in DESENLACES:
+                for des in desenlaces_ext:
                     if des not in chunk:
                         continue
                     sub = chunk[[clima, des]].dropna()
-                    sub = sub[sub[des].isin([1, 2])]
+                    sub = sub[sub[des].isin([codigo_si, codigo_no])]
                     if sub.empty:
                         continue
                     correlaciones[clima][des].actualizar(sub[clima].astype(float), sub[des].astype(float))
@@ -159,7 +255,7 @@ def main():
     print("=" * 70)
     hallazgos_comorbilidad = []
     for com in COMORBILIDADES:
-        for des in DESENLACES:
+        for des in desenlaces_ext:
             ct = crosstab[com][des]
             con_total = ct["con_si"] + ct["con_no"]
             sin_total = ct["sin_si"] + ct["sin_no"]
@@ -178,7 +274,7 @@ def main():
     print("=" * 70)
     hallazgos_clima = []
     for clima in VARIABLES_CLIMA:
-        for des in DESENLACES:
+        for des in desenlaces_ext:
             r = correlaciones[clima][des].r()
             n = correlaciones[clima][des].n
             if r is None or n < 30:
