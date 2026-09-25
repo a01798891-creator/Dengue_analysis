@@ -32,17 +32,13 @@ COLUMNAS_DESEADAS = (
 
 
 def encontrar_archivos():
-    candidatos = []
+    # Si el mismo nombre existe en varias carpetas (p.ej. proyecto y Downloads),
+    # se usa solo una copia para no contar los mismos casos dos veces.
+    elegidos = {}
     for base in (os.path.dirname(os.path.abspath(__file__)), os.path.expanduser("~/Downloads")):
-        candidatos += glob.glob(os.path.join(base, "Dataframe_dengue_*confirmados*.csv"))
-    # quitar duplicados preservando orden
-    vistos = set()
-    archivos = []
-    for f in candidatos:
-        if f not in vistos:
-            vistos.add(f)
-            archivos.append(f)
-    return sorted(archivos)
+        for ruta in glob.glob(os.path.join(base, "Dataframe_dengue_*confirmados*.csv")):
+            elegidos.setdefault(os.path.basename(ruta), ruta)
+    return sorted(elegidos.values())
 
 
 def extraer_anio(nombre_archivo):
